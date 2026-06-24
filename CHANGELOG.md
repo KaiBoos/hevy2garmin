@@ -6,8 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-06-24
+
+### Fixed
+- **Exercises showing as "Choose an Exercise" on watch-recorded activities** ([#159](https://github.com/drkostas/hevy2garmin/issues/159)). When you record a strength workout on your Garmin watch and the tool merges Hevy data into it, Garmin accepts the sets but ignores the exercise names, so every set stays "Choose an Exercise". The tool now verifies after the merge whether the names actually stuck. When Garmin drops them, it restores the watch activity and uploads a separate, properly named activity instead, so the exercises are named. Confirmed live against a real Garmin account.
+
+## [0.5.2] - 2026-06-24
+
+### Fixed
+- **"Workout not found" when syncing older workouts** ([#165](https://github.com/drkostas/hevy2garmin/issues/165)) — the per-workout Upload button and HR fetch now look up the exact workout by ID (`GET /v1/workouts/{id}`) instead of scanning only the first page of 10, so users with more than a page of history can sync any workout, not just recent ones.
+
+## [0.5.1] - 2026-06-23
+
+### Added
+- **Merge into non-strength watch activities** ([#157](https://github.com/drkostas/hevy2garmin/pull/157)) — a `merge_activity_types` setting (default `["strength_training"]`) lets Enhance Watch Activities fuse Hevy workouts into other Garmin activity types you record on the watch (e.g. Indoor Climbing), instead of creating a duplicate. Configure extra types under Settings → Enhance Watch Activities → Advanced. Thanks @braianrabanal.
+
+### Changed
+- **Garmin login is now mobile-first** ([#147](https://github.com/drkostas/hevy2garmin/issues/147), [garmin-auth#29](https://github.com/drkostas/garmin-auth/issues/29)) — the login worker tries Garmin's mobile/app endpoint first (the one built for native 2FA, so MFA accounts no longer take a portal→427→fallback detour) and **no longer retries the other endpoint on a rate limit**. Garmin's login limit is per-account across both endpoints, so the old fallback was deepening the throttle that wouldn't clear. Verified end-to-end on a real 2FA account (login → email MFA → tokens).
+
 ### Added
 - Version + changelog link in the dashboard footer ([#144](https://github.com/drkostas/hevy2garmin/issues/144)) — confirm which build you're running after an upgrade.
+- **Heart rate now embedded in the uploaded activity** ([#158](https://github.com/drkostas/hevy2garmin/issues/158)) — fetched HR is written into the FIT at real timestamps, so it appears on the Garmin Connect activity, not just the dashboard chart. New `hr.py` merges HR sources (in-workout/AirPods-preferred, Garmin watch fill); the merge is source-agnostic and ready for in-workout HR the moment Hevy exposes it via the API (it does not today). Gated by the existing HR-fusion toggle, cached, and best-effort (never breaks a sync).
 
 ### Fixed
 - **Serverless persistence** ([#145](https://github.com/drkostas/hevy2garmin/issues/145)) — custom exercise mappings and profile/settings now persist to Postgres on cloud deployments instead of the read-only `~/.hevy2garmin` filesystem. Fixes the 500 when saving a mapping on Vercel ([#142](https://github.com/drkostas/hevy2garmin/issues/142)), profile reverting to defaults / Pull-from-Garmin not sticking ([#139](https://github.com/drkostas/hevy2garmin/issues/139)), and the blank-dashboard crash on deploy without a database — now an actionable "set DATABASE_URL" error.
