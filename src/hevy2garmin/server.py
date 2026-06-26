@@ -129,7 +129,7 @@ def _get_unmapped_exercises() -> list[tuple[str, int]]:
             for w in data.get("workouts", []):
                 for ex in w.get("exercises", []):
                     name = ex.get("title") or ex.get("name", "")
-                    if name and lookup_exercise(name)[0] == 65534:
+                    if name and lookup_exercise(name, ex.get("exercise_template_id"))[0] == 65534:
                         unmapped[name] = unmapped.get(name, 0) + 1
             if pg >= data.get("page_count", 1):
                 break
@@ -881,6 +881,7 @@ async def settings_save(
     merge_overlap_pct: int = Form(70),
     merge_max_drift_min: int = Form(20),
     merge_extra_types: str = Form(""),
+    merge_watch_strategy: str = Form("replace"),
 ):
     if is_demo_mode():
         return HTMLResponse('<div class="toast toast-error">Settings are read-only in demo mode</div>')
@@ -911,6 +912,7 @@ async def settings_save(
     config["merge_activity_types"] = ["strength_training"] + [
         t for t in dict.fromkeys(extra_types) if t != "strength_training"
     ]
+    config["merge_watch_strategy"] = merge_watch_strategy if merge_watch_strategy in ("replace", "merge", "describe") else "replace"
     save_config(config)
 
     # Persist settings to DB on cloud (filesystem is read-only on Vercel)
@@ -926,6 +928,7 @@ async def settings_save(
                 "merge_overlap_pct": config["merge_overlap_pct"],
                 "merge_max_drift_min": config["merge_max_drift_min"],
                 "merge_activity_types": config["merge_activity_types"],
+                "merge_watch_strategy": config["merge_watch_strategy"],
             })
         except Exception as e:
             logger.warning("Failed to persist settings to DB: %s", e)
@@ -979,6 +982,33 @@ async def api_save_mapping(request: Request):
 
     cat_label = _get_cat_names().get(category, f"Category {category}")
     return HTMLResponse(f'<div class="toast toast-success">Mapped "{hevy_name}" → {cat_label} ({category}:{subcategory}). <a href="/mappings">Reload</a></div>')
+
+
+@app.post("/api/reload-data", response_class=HTMLResponse)
+async def api_reload_data(request: Request):
+    """Clear the cached Hevy workout data so the dashboard refetches from Hevy.
+
+    The workouts page serves cached pages (populated during sync), so editing a
+    workout in Hevy was not reflected until the next sync. This button drops the
+    cached pages and reloads with fresh data (#174).
+    """
+    if is_demo_mode():
+        return HTMLResponse('<div class="toast toast-error">Read-only in demo mode</div>')
+    config = load_config()
+    try:
+        from hevy2garmin.hevy import HevyClient
+        _db = db.get_db()
+        total = HevyClient(api_key=config.get("hevy_api_key")).get_workout_count()
+        _db.set_app_config("hevy_total", {"count": total})
+        for pg in range(1, (total // 10) + 2):
+            _db.set_app_config(f"hevy_workouts_page_{pg}", {})
+        global _unmapped_cache
+        _unmapped_cache = None
+        # HX-Refresh tells htmx to reload the page, which refetches fresh data.
+        return HTMLResponse("", headers={"HX-Refresh": "true"})
+    except Exception as e:
+        logger.warning("Reload data failed: %s", e)
+        return HTMLResponse(f'<div class="toast toast-error">Reload failed: {str(e)[:120]}</div>')
 
 
 @app.post("/api/mapping/delete", response_class=HTMLResponse)
@@ -1567,7 +1597,7 @@ def _scan_for_unsynced(hevy, is_synced, total_count, failed_ids, on_page=None):
                 unsynced = w
             for ex in w.get("exercises", []):
                 name = ex.get("title") or ex.get("name", "")
-                if name and lookup_exercise(name)[0] == 65534:
+                if name and lookup_exercise(name, ex.get("exercise_template_id"))[0] == 65534:
                     unmapped[name] = unmapped.get(name, 0) + 1
         if unsynced:
             break
@@ -1627,6 +1657,7 @@ async def _do_sync_one(request: Request):
         merge_mode = config.get("merge_mode", True)
         sync_method = "upload"
         merge_forced_fresh = False
+        merge_delete_id = None
 
         # Merge mode: try to enhance a watch-recorded activity with Hevy data
         if merge_mode:
@@ -1635,6 +1666,7 @@ async def _do_sync_one(request: Request):
                 overlap_threshold=config.get("merge_overlap_pct", 70) / 100.0,
                 max_drift_minutes=config.get("merge_max_drift_min", 20),
                 activity_types=set(config.get("merge_activity_types", ["strength_training"])),
+                watch_strategy=config.get("merge_watch_strategy", "replace"),
             )
             if merge_result.merged:
                 aid = merge_result.activity_id
@@ -1656,6 +1688,7 @@ async def _do_sync_one(request: Request):
                 remaining = hevy.get_workout_count() - db.get_synced_count()
                 return JSONResponse({"synced": 1, "title": unsynced["title"], "remaining": max(0, remaining), "done": remaining <= 0})
             merge_forced_fresh = merge_result.force_fresh_upload
+            merge_delete_id = merge_result.delete_after_upload
 
         # HR enrichment for the uploaded FIT (#158): merged HR (AirPods-preferred,
         # watch fill), best-effort. Computed after the merge early-return so the
@@ -1688,6 +1721,15 @@ async def _do_sync_one(request: Request):
                 result = generate_fit(unsynced, hr_samples=hr_samples, output_path=fit_path)
                 upload_result = upload_fit(garmin_client, fit_path, workout_start=workout_start)
                 aid = upload_result.get("activity_id")
+                if aid and merge_delete_id:
+                    # "replace" strategy (#159): named upload succeeded, delete the
+                    # watch recording so the workout is a single activity.
+                    try:
+                        from hevy2garmin.garmin import delete_activity
+                        delete_activity(garmin_client, merge_delete_id)
+                        logger.info("Removed watch copy %s (replaced by %s)", merge_delete_id, aid)
+                    except Exception as e:
+                        logger.warning("Could not delete watch activity %s: %s", merge_delete_id, e)
                 if aid:
                     rename_activity(garmin_client, aid, unsynced["title"])
                     desc = generate_description(unsynced, calories=result.get("calories"), avg_hr=result.get("avg_hr"))

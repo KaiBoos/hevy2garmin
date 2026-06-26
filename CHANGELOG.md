@@ -6,6 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-06-26
+
+### Added
+- **"Merge sets" strategy for watch-recorded workouts** ([#159](https://github.com/drkostas/hevy2garmin/issues/159)). A third option for "Workouts recorded on a watch" (Settings, Advanced), requested by @bojanmk1: push the sets, reps, and weights into the watch activity and keep it, so you keep all the watch's native metrics (heart rate, training effect, body battery) and the structured set data in one activity. The exercise names still show as "Unknown" because Garmin does not apply pushed names to watch-recorded activities, but the set data is there. Default stays "replace" (named exercises, single activity).
+
+## [0.5.9] - 2026-06-26
+
+### Added
+- **One activity for watch-recorded workouts** ([#159](https://github.com/drkostas/hevy2garmin/issues/159)). New setting "Workouts recorded on a watch" (Settings, Advanced). The default "Replace" uploads a single named activity with your heart rate and deletes the watch recording, so you get one activity with named exercises and no double-counted calories or activity totals. "Keep" leaves the watch activity untouched and lists the exercises in its description instead.
+
+## [0.5.8] - 2026-06-26
+
+### Fixed
+- **Exercises showing as "Unknown" on watch-recorded workouts** ([#159](https://github.com/drkostas/hevy2garmin/issues/159)). When a workout was recorded on a Garmin watch, merge mode pushed the exercise sets, but Garmin ignores pushed exercise identities on activities it recorded itself, so they showed "Unknown" with no reps. The tool now checks the matched activity's manufacturer and, for any activity it did not create (a watch, etc.), uploads a fresh named activity instead of merging. Heart-rate fusion still pulls the watch HR into it. Confirmed against the live Garmin API.
+
+## [0.5.7] - 2026-06-26
+
+### Fixed
+- **Auto-sync interval always reset to 2 hours** ([#177](https://github.com/drkostas/hevy2garmin/issues/177)). The interval dropdown read its value with `this.value` inside an htmx hx-vals expression, which did not resolve, so every change saved the default (120 min). It now reads the selected value explicitly, so your chosen interval sticks. Thanks @KaiBoos.
+
+## [0.5.6] - 2026-06-25
+
+### Added
+- **Language-independent exercise mapping** ([#173](https://github.com/drkostas/hevy2garmin/issues/173)). Non-English Hevy exercises (German and others) now map to Garmin automatically using Hevy's `exercise_template_id`, which is the same in every language, instead of only the English exercise name. Built from Hevy's global catalog (428 exercises) via `scripts/gen_template_map.py`. You no longer need to map every exercise by hand just because your Hevy is not set to English. Thanks @KaiBoos for the idea.
+- **"Reload Data" button on the Workouts page** ([#174](https://github.com/drkostas/hevy2garmin/issues/174)). The page serves cached workout data, so editing a workout in Hevy was not reflected until the next sync. The button refetches your latest workouts from Hevy on demand. Thanks @KaiBoos.
+
 ## [0.5.5] - 2026-06-25
 
 ### Fixed
